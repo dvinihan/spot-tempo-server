@@ -3,15 +3,44 @@ const PORT = process.env.PORT || 5000;
 const bodyParser = require("body-parser");
 const axios = require("axios");
 const qs = require("querystring");
+const { getAllTracks } = require("./helpers/songs");
+const {
+  getDestinationPlaylistId,
+  getPlaylists,
+} = require("./helpers/playlists");
+const { getUserId } = require("./helpers/users");
 require("dotenv").config();
 
 let accessToken;
-let originSongs = [];
-let destinationSongs = [];
 let headers;
-let playlists;
-let userId;
 let destinationPlaylistId;
+let savedSongs = [];
+let destinationSongs = [];
+
+const refreshData = async () => {
+  try {
+    const playlistsPromise = getPlaylists(headers);
+    const userIdPromise = getUserId(headers);
+
+    const [playlists, userId] = await Promise.all(
+      playlistsPromise,
+      userIdPromise
+    );
+
+    destinationPlaylistId = await getDestinationPlaylistId(
+      playlists,
+      userId,
+      headers
+    );
+
+    const refreshedSongLists = await getAllTracks(headers);
+    savedSongs = refreshedSongLists.savedSongs;
+    destinationSongs = refreshedSongLists.destinationSongs;
+  } catch (error) {
+    console.log(error.message);
+    return res.status(500).send(error);
+  }
+};
 
 const app = express();
 app.use(bodyParser.json());
@@ -26,7 +55,7 @@ app.use((req, res, next) => {
 });
 
 app.get("/getAccessToken", (req, res) => {
-  return res.status(200).send(accessToken);
+  return res.status(200).send({ access_token: accessToken });
 });
 
 app.post("/login", async (req, res) => {
@@ -58,18 +87,18 @@ app.post("/login", async (req, res) => {
     refreshToken = response.data.refresh_token;
     headers = { Authorization: `Bearer ${accessToken}` };
 
-    await refreshData();
+    // await refreshData();
 
-    return res.status(200).send(accessToken);
+    return res.status(200).send({ access_token: accessToken });
   } catch (error) {
-    console.log(error);
+    console.log(error.message);
     return res.status(500).send("There has been an error.");
   }
 });
 
-app.post("/getNextOriginSongs", async (req, res) => {
+app.post("/getNextSavedSongs", async (req, res) => {
   await refreshData();
-  return res.status(200).send(originSongs.slice(req.body.start, req.body.end));
+  return res.status(200).send(savedSongs.slice(req.body.start, req.body.end));
 });
 
 app.post("/getNextDestinationSongs", async (req, res) => {
@@ -80,8 +109,7 @@ app.post("/getNextDestinationSongs", async (req, res) => {
 });
 
 app.post("/getMatchingSongs", (req, res) => {
-  console.log(originSongs[0]);
-  const matchingTracks = originSongs.filter(
+  const matchingTracks = savedSongs.filter(
     (track) =>
       track.tempo > Number(req.body.bpm) - 5 &&
       track.tempo < Number(req.body.bpm) + 5
@@ -132,163 +160,3 @@ app.post("/removeTrack", async (req, res) => {
 // });
 
 app.listen(PORT, () => console.log(`Listening on ${PORT}`));
-
-////////////////////
-// HELPERS
-
-const refreshData = async () => {
-  await getPlaylistsAndUserData();
-
-  destinationPlaylistId = await getPlaylistId("SpotTempo Workout");
-
-  originSongs = [];
-  destinationSongs = [];
-
-  await getSavedTracks(originSongs);
-  await getPlaylistTracks(destinationPlaylistId, destinationSongs);
-};
-
-const getPlaylistsAndUserData = async () => {
-  try {
-    const playlistsResponse = await axios.get(
-      "https://api.spotify.com/v1/me/playlists",
-      { headers }
-    );
-    const userResponse = await axios.get("https://api.spotify.com/v1/me", {
-      headers,
-    });
-
-    playlists = playlistsResponse.data.items;
-    userId = userResponse.data.id;
-  } catch (error) {
-    console.log(error.message);
-    // return res.status(500).send("There has been an error.");
-  }
-};
-
-// Creates the playlist if it doesn't exist, and returns its ID.
-const getPlaylistId = async (playlistName) => {
-  const playlist = playlists.find((playlist) => playlist.name === playlistName);
-  return playlist ? playlist.id : await createPlaylist(playlistName);
-};
-
-const createPlaylist = async (playlistName) => {
-  try {
-    let response = await axios.post(
-      `https://api.spotify.com/v1/users/${userId}/playlists`,
-      {
-        name: playlistName,
-      },
-      {
-        headers,
-      }
-    );
-
-    let playlist = await response.json();
-    return playlist.id;
-  } catch (error) {
-    console.log(error);
-  }
-};
-const getPlaylistTracks = async (playlistId, songs) => {
-  try {
-    // Get the first 100 tracks and the total number of tracks
-    let response = await axios.get(
-      `https://api.spotify.com/v1/users/${userId}/playlists/${playlistId}/tracks?limit=100`,
-      { headers }
-    );
-
-    songs.push(...response.data.items.map((item) => item.track));
-    const total = response.data.total;
-
-    // Get the rest of the tracks
-    let promises = [];
-    for (let i = 100; i <= total; i += 100) {
-      promises.push(
-        axios.get(
-          `https://api.spotify.com/v1/users/${userId}/playlists/${playlistId}/tracks?limit=100&offset=${i}`,
-          {
-            headers,
-          }
-        )
-      );
-    }
-
-    let promisesResponse;
-    promisesResponse = await Promise.all(promises);
-
-    promisesResponse.forEach((response) => {
-      songs.push(...response.data.items.map((item) => item.track));
-    });
-
-    for (let j = 0; j <= total + 100; j += 100) {
-      let audioFeatures;
-      const response = await axios.get(
-        `https://api.spotify.com/v1/audio-features/?ids=${songs
-          .slice(j, j + 100)
-          .map((track) => track.id)
-          .join(",")}`,
-        { headers }
-      );
-      audioFeatures = response.data.audio_features;
-
-      audioFeatures.forEach((audioFeature, index) => {
-        if (audioFeature && audioFeature.tempo) {
-          songs[j + index].tempo = Math.round(audioFeature.tempo);
-        }
-      });
-    }
-  } catch (error) {
-    return { error };
-  }
-};
-
-const getSavedTracks = async (songs) => {
-  try {
-    // Get the first 50 tracks and the total number of tracks
-    let response = await axios.get(
-      `https://api.spotify.com/v1/me/tracks?limit=50`,
-      { headers }
-    );
-
-    songs.push(...response.data.items.map((item) => item.track));
-    const total = response.data.total;
-
-    // Get the rest of the tracks
-    let promises = [];
-    for (let i = 50; i <= total; i += 50) {
-      promises.push(
-        axios.get(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${i}`, {
-          headers,
-        })
-      );
-    }
-
-    let promisesResponse;
-    promisesResponse = await Promise.all(promises);
-
-    promisesResponse.forEach((response) => {
-      songs.push(...response.data.items.map((item) => item.track));
-    });
-
-    for (let j = 0; j <= total + 50; j += 50) {
-      let audioFeatures;
-      const response = await axios.get(
-        `https://api.spotify.com/v1/audio-features/?ids=${songs
-          .slice(j, j + 50)
-          .map((track) => track.id)
-          .join(",")}`,
-        { headers }
-      );
-      audioFeatures = response.data.audio_features;
-
-      audioFeatures.forEach((audioFeature, index) => {
-        if (audioFeature && audioFeature.tempo) {
-          songs[j + index].tempo = Math.round(audioFeature.tempo);
-        }
-      });
-    }
-  } catch (error) {
-    return { error };
-  }
-};
