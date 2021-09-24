@@ -3,25 +3,8 @@ const PORT = process.env.PORT || 5000;
 const bodyParser = require("body-parser");
 const axios = require("axios");
 const qs = require("querystring");
+require("dotenv").config();
 
-const client_secret = "c5082a4127ae4ae7b61dd87abe544784";
-const client_id = "200fe6a2e65643b4bada24a59cebc2cb";
-
-const scope =
-  "playlist-read-private playlist-modify-private playlist-modify-public user-library-read";
-
-const generateRandomString = (length) => {
-  var text = "";
-  var possible =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-  for (var i = 0; i < length; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
-};
-
-const randomString = generateRandomString(16);
 let accessToken;
 let originSongs = [];
 let destinationSongs = [];
@@ -29,7 +12,6 @@ let headers;
 let playlists;
 let userId;
 let destinationPlaylistId;
-let originPlaylistId;
 
 const app = express();
 app.use(bodyParser.json());
@@ -47,26 +29,14 @@ app.get("/getAccessToken", (req, res) => {
   return res.status(200).send(accessToken);
 });
 
-app.get("/getAuthParams", (req, res) => {
-  res.status(200).send(
-    qs.stringify({
-      response_type: "code",
-      client_id,
-      scope,
-      // redirect_uri,
-      state: randomString,
-    })
-  );
-});
-
 app.post("/login", async (req, res) => {
   if (accessToken) {
     return res.status(200).send(accessToken);
   }
 
-  const base64data = new Buffer.from(`${client_id}:${client_secret}`).toString(
-    "base64"
-  );
+  const base64data = new Buffer.from(
+    `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
+  ).toString("base64");
 
   try {
     const response = await axios.post(
@@ -110,6 +80,7 @@ app.post("/getNextDestinationSongs", async (req, res) => {
 });
 
 app.post("/getMatchingSongs", (req, res) => {
+  console.log(originSongs[0]);
   const matchingTracks = originSongs.filter(
     (track) =>
       track.tempo > Number(req.body.bpm) - 5 &&
@@ -168,13 +139,12 @@ app.listen(PORT, () => console.log(`Listening on ${PORT}`));
 const refreshData = async () => {
   await getPlaylistsAndUserData();
 
-  originPlaylistId = await getPlaylistId("SpotTempo");
   destinationPlaylistId = await getPlaylistId("SpotTempo Workout");
 
   originSongs = [];
   destinationSongs = [];
 
-  await getPlaylistTracks(originPlaylistId, originSongs);
+  await getSavedTracks(originSongs);
   await getPlaylistTracks(destinationPlaylistId, destinationSongs);
 };
 
@@ -256,6 +226,56 @@ const getPlaylistTracks = async (playlistId, songs) => {
       const response = await axios.get(
         `https://api.spotify.com/v1/audio-features/?ids=${songs
           .slice(j, j + 100)
+          .map((track) => track.id)
+          .join(",")}`,
+        { headers }
+      );
+      audioFeatures = response.data.audio_features;
+
+      audioFeatures.forEach((audioFeature, index) => {
+        if (audioFeature && audioFeature.tempo) {
+          songs[j + index].tempo = Math.round(audioFeature.tempo);
+        }
+      });
+    }
+  } catch (error) {
+    return { error };
+  }
+};
+
+const getSavedTracks = async (songs) => {
+  try {
+    // Get the first 50 tracks and the total number of tracks
+    let response = await axios.get(
+      `https://api.spotify.com/v1/me/tracks?limit=50`,
+      { headers }
+    );
+
+    songs.push(...response.data.items.map((item) => item.track));
+    const total = response.data.total;
+
+    // Get the rest of the tracks
+    let promises = [];
+    for (let i = 50; i <= total; i += 50) {
+      promises.push(
+        axios.get(`https://api.spotify.com/v1/me/tracks?limit=50&offset=${i}`, {
+          headers,
+        })
+      );
+    }
+
+    let promisesResponse;
+    promisesResponse = await Promise.all(promises);
+
+    promisesResponse.forEach((response) => {
+      songs.push(...response.data.items.map((item) => item.track));
+    });
+
+    for (let j = 0; j <= total + 50; j += 50) {
+      let audioFeatures;
+      const response = await axios.get(
+        `https://api.spotify.com/v1/audio-features/?ids=${songs
+          .slice(j, j + 50)
           .map((track) => track.id)
           .join(",")}`,
         { headers }
