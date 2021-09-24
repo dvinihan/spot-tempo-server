@@ -10,7 +10,7 @@ const client_id = "200fe6a2e65643b4bada24a59cebc2cb";
 const scope =
   "playlist-read-private playlist-modify-private playlist-modify-public user-library-read";
 
-const generateRandomString = length => {
+const generateRandomString = (length) => {
   var text = "";
   var possible =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -36,7 +36,10 @@ app.use(bodyParser.json());
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept"
+  );
   next();
 });
 
@@ -51,7 +54,7 @@ app.get("/getAuthParams", (req, res) => {
       client_id,
       scope,
       // redirect_uri,
-      state: randomString
+      state: randomString,
     })
   );
 });
@@ -59,10 +62,6 @@ app.get("/getAuthParams", (req, res) => {
 app.post("/login", async (req, res) => {
   if (accessToken) {
     return res.status(200).send(accessToken);
-  }
-
-  if (req.body.state !== randomString) {
-    return res.status(200).send({ mismatch: true });
   }
 
   const base64data = new Buffer.from(`${client_id}:${client_secret}`).toString(
@@ -75,13 +74,13 @@ app.post("/login", async (req, res) => {
       qs.stringify({
         code: req.body.code,
         redirect_uri: req.body.redirect_uri,
-        grant_type: "authorization_code"
+        grant_type: "authorization_code",
       }),
       {
         headers: {
-          Authorization: `Basic ${base64data}`
+          Authorization: `Basic ${base64data}`,
         },
-        json: true
+        json: true,
       }
     );
 
@@ -93,6 +92,7 @@ app.post("/login", async (req, res) => {
 
     return res.status(200).send(accessToken);
   } catch (error) {
+    console.log(error);
     return res.status(500).send("There has been an error.");
   }
 });
@@ -111,7 +111,7 @@ app.post("/getNextDestinationSongs", async (req, res) => {
 
 app.post("/getMatchingSongs", (req, res) => {
   const matchingTracks = originSongs.filter(
-    track =>
+    (track) =>
       track.tempo > Number(req.body.bpm) - 5 &&
       track.tempo < Number(req.body.bpm) + 5
   );
@@ -143,8 +143,8 @@ app.post("/removeTrack", async (req, res) => {
       method: "DELETE",
       headers,
       data: {
-        tracks: [{ uri: req.body.trackId, positions: [req.body.position] }]
-      }
+        tracks: [{ uri: req.body.trackId, positions: [req.body.position] }],
+      },
     });
 
     res.status(200).send();
@@ -185,7 +185,7 @@ const getPlaylistsAndUserData = async () => {
       { headers }
     );
     const userResponse = await axios.get("https://api.spotify.com/v1/me", {
-      headers
+      headers,
     });
 
     playlists = playlistsResponse.data.items;
@@ -197,20 +197,20 @@ const getPlaylistsAndUserData = async () => {
 };
 
 // Creates the playlist if it doesn't exist, and returns its ID.
-const getPlaylistId = async playlistName => {
-  const playlist = playlists.find(playlist => playlist.name === playlistName);
+const getPlaylistId = async (playlistName) => {
+  const playlist = playlists.find((playlist) => playlist.name === playlistName);
   return playlist ? playlist.id : await createPlaylist(playlistName);
 };
 
-const createPlaylist = async playlistName => {
+const createPlaylist = async (playlistName) => {
   try {
     let response = await axios.post(
       `https://api.spotify.com/v1/users/${userId}/playlists`,
       {
-        name: playlistName
+        name: playlistName,
       },
       {
-        headers
+        headers,
       }
     );
 
@@ -228,7 +228,7 @@ const getPlaylistTracks = async (playlistId, songs) => {
       { headers }
     );
 
-    songs.push(...response.data.items.map(item => item.track));
+    songs.push(...response.data.items.map((item) => item.track));
     const total = response.data.total;
 
     // Get the rest of the tracks
@@ -238,7 +238,7 @@ const getPlaylistTracks = async (playlistId, songs) => {
         axios.get(
           `https://api.spotify.com/v1/users/${userId}/playlists/${playlistId}/tracks?limit=100&offset=${i}`,
           {
-            headers
+            headers,
           }
         )
       );
@@ -247,8 +247,8 @@ const getPlaylistTracks = async (playlistId, songs) => {
     let promisesResponse;
     promisesResponse = await Promise.all(promises);
 
-    promisesResponse.forEach(response => {
-      songs.push(...response.data.items.map(item => item.track));
+    promisesResponse.forEach((response) => {
+      songs.push(...response.data.items.map((item) => item.track));
     });
 
     for (let j = 0; j <= total + 100; j += 100) {
@@ -256,7 +256,7 @@ const getPlaylistTracks = async (playlistId, songs) => {
       const response = await axios.get(
         `https://api.spotify.com/v1/audio-features/?ids=${songs
           .slice(j, j + 100)
-          .map(track => track.id)
+          .map((track) => track.id)
           .join(",")}`,
         { headers }
       );
