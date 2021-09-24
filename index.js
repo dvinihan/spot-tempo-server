@@ -1,11 +1,11 @@
 import express from "express";
 import axios from "axios";
-import qs from "querystring";
 import { getAllTracks } from "./helpers/songs.js";
 import { getDestinationPlaylistId, getPlaylists } from "./helpers/playlists.js";
 import { getUserId } from "./helpers/users.js";
-
 import dotenv from "dotenv";
+import { URLSearchParams } from "url";
+
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
@@ -18,14 +18,16 @@ let savedSongs = [];
 let destinationSongs = [];
 
 const refreshData = async () => {
+  console.log("refreshing data");
+
   try {
     const playlistsPromise = getPlaylists(headers);
     const userIdPromise = getUserId(headers);
 
-    const [playlists, userId] = await Promise.all(
+    const [playlists, userId] = await Promise.all([
       playlistsPromise,
-      userIdPromise
-    );
+      userIdPromise,
+    ]);
 
     destinationPlaylistId = await getDestinationPlaylistId(
       playlists,
@@ -70,14 +72,14 @@ app.post("/login", async (req, res) => {
     return res.status(200).send(accessToken);
   }
 
-  const base64data = new Buffer.From(
+  const base64data = new Buffer.from(
     `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
   ).toString("base64");
 
   try {
     const response = await axios.post(
       "https://accounts.spotify.com/api/token",
-      qs.stringify({
+      new URLSearchParams({
         code: req.body.code,
         redirect_uri: req.body.redirect_uri,
         grant_type: "authorization_code",
@@ -97,37 +99,40 @@ app.post("/login", async (req, res) => {
     return res.status(200).send({ access_token: accessToken });
   } catch (error) {
     console.log(error.message);
+    // console.log(error);
+
     return res.status(500).send("There has been an error.");
   }
 });
 
-app.get("/reload", async (req, res) => {
+app.post("/reload", async (req, res) => {
+  console.log("/reload");
   await refreshData();
   return res.status(200).send({ total: savedSongs.length });
 });
 
-app.post("/getNextSavedSongs", async (req, res) => {
+app.get("/getNextSavedSongs", async (req, res) => {
   await refreshData();
-  return res.status(200).send(savedSongs.slice(req.body.start, req.body.end));
+  return res.status(200).send(savedSongs.slice(req.query.start, req.query.end));
 });
 
-app.post("/getNextDestinationSongs", async (req, res) => {
+app.get("/getNextDestinationSongs", async (req, res) => {
   await refreshData();
   return res
     .status(200)
-    .send(destinationSongs.slice(req.body.start, req.body.end));
+    .send(destinationSongs.slice(req.query.start, req.query.end));
 });
 
-app.post("/getMatchingSongs", (req, res) => {
+app.get("/getMatchingSongs", (req, res) => {
   const matchingTracks = savedSongs.filter(
     (track) =>
-      track.tempo > Number(req.body.bpm) - 5 &&
-      track.tempo < Number(req.body.bpm) + 5
+      track.tempo > Number(req.query.bpm) - 5 &&
+      track.tempo < Number(req.query.bpm) + 5
   );
 
   return res
     .status(200)
-    .send(matchingTracks.slice(req.body.start, req.body.end));
+    .send(matchingTracks.slice(req.query.start, req.query.end));
 });
 
 app.post("/addTrack", async (req, res) => {
@@ -145,14 +150,14 @@ app.post("/addTrack", async (req, res) => {
   }
 });
 
-app.post("/removeTrack", async (req, res) => {
+app.delete("/removeTrack", async (req, res) => {
   try {
     await axios({
       url: `https://api.spotify.com/v1/playlists/${destinationPlaylistId}/tracks`,
       method: "DELETE",
       headers,
       data: {
-        tracks: [{ uri: req.body.trackId, positions: [req.body.position] }],
+        tracks: [{ uri: req.query.trackId, positions: [req.query.position] }],
       },
     });
 

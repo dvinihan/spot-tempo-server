@@ -1,1 +1,1 @@
-export const DESTINATION_PLAYLIST_NAME = "SpotTempo Workout";
+export const DESTINATION_PLAYLIST_NAME = "SpotTempo";

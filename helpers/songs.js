@@ -10,10 +10,10 @@ export const getAllTracks = async (destinationPlaylistId, userId, headers) => {
     headers,
   });
 
-  const [savedSongs, destinationSongs] = await Promise.all(
+  const [savedSongs, destinationSongs] = await Promise.all([
     savedSongsPromise,
-    destinationSongsPromise
-  );
+    destinationSongsPromise,
+  ]);
 
   return { savedSongs, destinationSongs };
 };
@@ -61,9 +61,9 @@ const getTracks = async ({ playlistId, userId, headers }) => {
     );
 
     audioFeatureData.audio_features.forEach((audioFeature, index) => {
-      // if (audioFeature && audioFeature.tempo) {
-      songs[j + index].tempo = Math.round(audioFeature.tempo);
-      // }
+      if (audioFeature && audioFeature.tempo) {
+        songs[j + index].tempo = Math.round(audioFeature.tempo);
+      }
     });
   }
 
