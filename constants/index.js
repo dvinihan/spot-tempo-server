@@ -1,3 +1,3 @@
-const DESTINATION_PLAYLIST_NAME = "SpotTempo Workout";
+const DESTINATION_PLAYLIST_NAME = 'SpotTempo Workout'
 
-module.exports = { DESTINATION_PLAYLIST_NAME };
+module.exports = { DESTINATION_PLAYLIST_NAME }
