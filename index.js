@@ -50,7 +50,7 @@ const refreshData = async () => {
     savedSongs = refreshedSongLists.savedSongs;
     destinationSongs = refreshedSongLists.destinationSongs;
   } catch (error) {
-    console.log(error.message);
+    console.log("refresh error:", error.message);
   }
 };
 
@@ -61,8 +61,9 @@ const refreshDestinationPlaylist = async () => {
       userId,
       headers,
     });
+    savedSongs = updatePlaylistStatus(savedSongs, destinationSongs);
   } catch (error) {
-    console.log(error.message);
+    console.log("refresh destination playlist error:", error.message);
   }
 };
 
@@ -75,6 +76,8 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Headers",
     "Origin, X-Requested-With, Content-Type, Accept"
   );
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+
   next();
 });
 
@@ -117,9 +120,7 @@ app.post("/login", async (req, res) => {
 
     return res.status(200).send({ access_token: accessToken });
   } catch (error) {
-    console.log(error.message);
-    // console.log(error);
-
+    console.log("login error", error.message);
     return res.status(500).send("There has been an error.");
   }
 });
@@ -145,9 +146,6 @@ app.get("/getNextDestinationSongs", async (req, res) => {
 app.get("/getMatchingSongs", async (req, res) => {
   await refreshDestinationPlaylist();
 
-  // refresh playlist status
-  savedSongs = updatePlaylistStatus(savedSongs, destinationSongs);
-
   const matchingTracks = savedSongs.filter(
     (track) =>
       track.tempo > Number(req.query.bpm) - 5 &&
@@ -159,36 +157,36 @@ app.get("/getMatchingSongs", async (req, res) => {
     .send(matchingTracks.slice(req.query.start, req.query.end));
 });
 
-app.post("/addTrack", async (req, res) => {
+app.post("/addSong", async (req, res) => {
   try {
     await axios.post(
       `https://api.spotify.com/v1/playlists/${destinationPlaylistId}/tracks`,
-      { uris: [req.body.trackId] },
+      { uris: [req.body.songUri] },
       { headers }
     );
 
+    await refreshDestinationPlaylist();
     res.status(200).send();
-    await refreshData();
   } catch (error) {
-    console.log(error);
+    console.log("addSong error", error.message);
   }
 });
 
-app.delete("/removeTrack", async (req, res) => {
+app.delete("/removeSong", async (req, res) => {
   try {
     await axios({
       url: `https://api.spotify.com/v1/playlists/${destinationPlaylistId}/tracks`,
       method: "DELETE",
       headers,
       data: {
-        tracks: [{ uri: req.query.trackId, positions: [req.query.position] }],
+        tracks: [{ uri: req.query.songUri }],
       },
     });
 
+    await refreshDestinationPlaylist();
     res.status(200).send();
-    await refreshData();
   } catch (error) {
-    console.log(error);
+    console.log("removeSong error", error.message);
   }
 });
 
