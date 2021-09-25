@@ -15,10 +15,15 @@ export const getAllTracks = async (destinationPlaylistId, userId, headers) => {
     destinationSongsPromise,
   ]);
 
-  return { savedSongs, destinationSongs };
+  const savedSongsWithPlaylistStatus = updatePlaylistStatus(
+    savedSongs,
+    destinationSongs
+  );
+
+  return { savedSongs: savedSongsWithPlaylistStatus, destinationSongs };
 };
 
-const getTracks = async ({ playlistId, userId, headers }) => {
+export const getTracks = async ({ playlistId, userId, headers }) => {
   const limit = 50;
   const tracksUrl =
     playlistId && userId
@@ -26,12 +31,14 @@ const getTracks = async ({ playlistId, userId, headers }) => {
       : "https://api.spotify.com/v1/me/tracks";
 
   // Get the first batch of tracks and the total number of tracks
-  const { data: trackData } = await axios.get(`${tracksUrl}?limit=${limit}`, {
-    headers,
-  });
+  const { data: firstTrackData } = await axios.get(
+    `${tracksUrl}?limit=${limit}`,
+    {
+      headers,
+    }
+  );
 
-  const songs = trackData.items.map((item) => item.track);
-  const total = trackData.total;
+  const total = firstTrackData.total;
 
   // Get the rest of the tracks
   const promises = [];
@@ -45,10 +52,17 @@ const getTracks = async ({ playlistId, userId, headers }) => {
 
   const promisesResponse = await Promise.all(promises);
 
-  promisesResponse.forEach(({ data }) => {
-    songs.push(...data.items.map((item) => item.track));
+  const songs = [...firstTrackData.items];
+  promisesResponse.forEach((response) => {
+    songs.push(...response.data.items);
   });
 
+  const songsCompact = songs.map((song) => extractRelevantFields(song.track));
+
+  return await addSongTempos(songsCompact, total, limit, headers);
+};
+
+const addSongTempos = async (songs, total, limit, headers) => {
   for (let j = 0; j <= total + limit; j += limit) {
     const songIds = songs
       .slice(j, j + 100)
@@ -68,4 +82,41 @@ const getTracks = async ({ playlistId, userId, headers }) => {
   }
 
   return songs;
+};
+
+const extractRelevantFields = (song) => {
+  const { artists, id, name, uri } = song;
+
+  const artistNamesList = artists.reduce(
+    (acc, artist) => [...acc, artist.name],
+    []
+  );
+  const artistNameString = buildArtistName(artistNamesList);
+
+  return { artist: artistNameString, id, name, uri };
+};
+
+const buildArtistName = (artists) => {
+  return artists.reduce((name, artist, index) => {
+    const addition =
+      index === 0 && artists.length === 1
+        ? artist
+        : index === 0
+        ? `${artist} feat. `
+        : index === 1
+        ? artist
+        : index === artists.length - 1
+        ? ` & ${artist}`
+        : `, ${artist}`;
+    return name.concat(addition);
+  }, "");
+};
+
+export const updatePlaylistStatus = (savedSongs, destinationSongs) => {
+  return savedSongs.map((song) => {
+    const isInDestinationPlaylist = Boolean(
+      destinationSongs.find((s) => s.id === song.id)
+    );
+    return { ...song, isInDestinationPlaylist };
+  });
 };

@@ -1,6 +1,10 @@
 import express from "express";
 import axios from "axios";
-import { getAllTracks } from "./helpers/songs.js";
+import {
+  getAllTracks,
+  getTracks,
+  updatePlaylistStatus,
+} from "./helpers/songs.js";
 import { getDestinationPlaylistId, getPlaylists } from "./helpers/playlists.js";
 import { getUserId } from "./helpers/users.js";
 import dotenv from "dotenv";
@@ -12,6 +16,7 @@ const PORT = process.env.PORT || 5000;
 
 let accessToken;
 let refreshToken;
+let userId;
 let headers;
 let destinationPlaylistId;
 let savedSongs = [];
@@ -24,10 +29,12 @@ const refreshData = async () => {
     const playlistsPromise = getPlaylists(headers);
     const userIdPromise = getUserId(headers);
 
-    const [playlists, userId] = await Promise.all([
+    const [playlists, fetchedUserId] = await Promise.all([
       playlistsPromise,
       userIdPromise,
     ]);
+
+    userId = fetchedUserId;
 
     destinationPlaylistId = await getDestinationPlaylistId(
       playlists,
@@ -42,6 +49,18 @@ const refreshData = async () => {
     );
     savedSongs = refreshedSongLists.savedSongs;
     destinationSongs = refreshedSongLists.destinationSongs;
+  } catch (error) {
+    console.log(error.message);
+  }
+};
+
+const refreshDestinationPlaylist = async () => {
+  try {
+    destinationSongs = await getTracks({
+      playlistId: destinationPlaylistId,
+      userId,
+      headers,
+    });
   } catch (error) {
     console.log(error.message);
   }
@@ -123,7 +142,12 @@ app.get("/getNextDestinationSongs", async (req, res) => {
     .send(destinationSongs.slice(req.query.start, req.query.end));
 });
 
-app.get("/getMatchingSongs", (req, res) => {
+app.get("/getMatchingSongs", async (req, res) => {
+  await refreshDestinationPlaylist();
+
+  // refresh playlist status
+  savedSongs = updatePlaylistStatus(savedSongs, destinationSongs);
+
   const matchingTracks = savedSongs.filter(
     (track) =>
       track.tempo > Number(req.query.bpm) - 5 &&
