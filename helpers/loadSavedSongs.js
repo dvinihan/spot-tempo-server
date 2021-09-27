@@ -5,6 +5,7 @@ import { getFreshSavedSongs } from "./getFreshSavedSongs.js";
 import { getUserId } from "./getUserId.js";
 import { getPlaylists } from "./getPlaylists.js";
 import { createDestinationPlaylist } from "./createDestinationPlaylist.js";
+import { getNextDestinationPlaylistId } from "./getDestinationPlaylistId.js";
 
 export const loadSavedSongs = async (db, headers) => {
   const playlistsPromise = getPlaylists(headers);
@@ -15,13 +16,15 @@ export const loadSavedSongs = async (db, headers) => {
     userIdPromise,
   ]);
 
-  const destinationPlaylist =
-    playlists.find((playlist) => playlist.name === DESTINATION_PLAYLIST_NAME) ||
-    (await createDestinationPlaylist(userId, headers));
+  const destinationPlaylistId = await getNextDestinationPlaylistId(
+    playlists,
+    userId,
+    headers
+  );
 
   const savedSongsPromise = getFreshSavedSongs(headers);
   const destinationSongsPromise = getFreshPlaylistSongs(
-    destinationPlaylist.id,
+    destinationPlaylistId,
     userId,
     headers
   );

@@ -1,13 +1,14 @@
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
-import { URLSearchParams } from "url";
 import { connectToDatabase } from "./util/mongodb.js";
 import { loadSavedSongs } from "./helpers/loadSavedSongs.js";
 import { updateDatabasePlaylistStatus } from "./helpers/updateDatabasePlaylistStatus.js";
 import { getFreshPlaylistSongs } from "./helpers/getFreshPlaylistSongs.js";
 import { getUserId } from "./helpers/getUserId.js";
 import { login } from "./helpers/login.js";
+import { getDestinationPlaylistId } from "./helpers/getDestinationPlaylistId";
+import { getPlaylists } from "./helpers/getPlaylists.js";
 
 dotenv.config();
 
@@ -35,9 +36,22 @@ app.get("/getAccessToken", (req, res) => {
   return res.status(200).send({ accessToken });
 });
 
+app.get("/getUserId", async (req, res) => {
+  let userId;
+  if (headers) {
+    userId = await getUserId(headers);
+  }
+  return res.status(200).send({ userId });
+});
+
 app.get("/getSavedSongsCount", async (req, res) => {
   const db = await connectToDatabase();
-  const count = await db.collection("saved-songs").count();
+
+  const document = await db
+    .collection("saved-songs")
+    .findOne({ user: req.query.user });
+
+  const count = document.songs.length;
 
   return res.status(200).send({ count });
 });
@@ -55,7 +69,7 @@ app.post("/login", async (req, res) => {
     headers = newHeaders;
   }
 
-  const userId = await getUserId();
+  const userId = await getUserId(headers);
   return res.status(200).send({ accessToken, userId });
 });
 
@@ -82,7 +96,25 @@ app.post("/reload", async (req, res) => {
 app.get("/getMatchingSongs", async (req, res) => {
   const db = await connectToDatabase();
 
-  const destinationSongs = await getFreshPlaylistSongs();
+  const playlistsPromise = getPlaylists(headers);
+  const userIdPromise = getUserId(headers);
+
+  const [playlists, userId] = await Promise.all([
+    playlistsPromise,
+    userIdPromise,
+  ]);
+
+  const destinationPlaylistId = await getDestinationPlaylistId(
+    playlists,
+    userId,
+    headers
+  );
+
+  const destinationSongs = await getFreshPlaylistSongs(
+    destinationPlaylistId,
+    userId,
+    headers
+  );
   await updateDatabasePlaylistStatus(db, destinationSongs);
 
   const savedSongs = db.collection().find();
