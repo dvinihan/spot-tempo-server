@@ -2,13 +2,22 @@ export const updateDatabasePlaylistStatus = async (db, destinationSongs) => {
   const destinationSongIds = destinationSongs.map((song) => song.id);
 
   try {
-    db.collection("saved-songs").updateMany(
-      { id: { $in: destinationSongIds } },
-      { $set: { isInDestinationPlaylist: true } }
+    await db.collection("saved-songs").updateMany(
+      {},
+      { $set: { "songs.$[song].isInDestinationPlaylist": true } },
+      {
+        multi: true,
+        arrayFilters: [{ "song.id": { $in: destinationSongIds } }],
+      }
     );
-    db.collection("saved-songs").updateMany(
-      { id: { $not: { $in: destinationSongIds } } },
-      { $set: { isInDestinationPlaylist: false } }
+
+    await db.collection("saved-songs").updateMany(
+      {},
+      { $set: { "songs.$[song].isInDestinationPlaylist": false } },
+      {
+        multi: true,
+        arrayFilters: [{ "song.id": { $not: { $in: destinationSongIds } } }],
+      }
     );
   } catch (error) {
     console.log(

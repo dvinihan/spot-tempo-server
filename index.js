@@ -7,8 +7,9 @@ import { updateDatabasePlaylistStatus } from "./helpers/updateDatabasePlaylistSt
 import { getFreshPlaylistSongs } from "./helpers/getFreshPlaylistSongs.js";
 import { getUserId } from "./helpers/getUserId.js";
 import { login } from "./helpers/login.js";
-import { getDestinationPlaylistId } from "./helpers/getDestinationPlaylistId";
+import { getDestinationPlaylistId } from "./helpers/getDestinationPlaylistId.js";
 import { getPlaylists } from "./helpers/getPlaylists.js";
+import { getDatabaseSavedSongs } from "./helpers/getDatabaseSavedSongs.js";
 
 dotenv.config();
 
@@ -47,11 +48,8 @@ app.get("/getUserId", async (req, res) => {
 app.get("/getSavedSongsCount", async (req, res) => {
   const db = await connectToDatabase();
 
-  const document = await db
-    .collection("saved-songs")
-    .findOne({ user: req.query.user });
-
-  const count = document.songs.length;
+  const savedSongs = await getDatabaseSavedSongs(db, req.query.user);
+  const count = savedSongs.length;
 
   return res.status(200).send({ count });
 });
@@ -76,22 +74,13 @@ app.post("/login", async (req, res) => {
 app.post("/reload", async (req, res) => {
   const db = await connectToDatabase();
 
-  await loadSavedSongs(db);
-  const count = await db.collection("saved-songs").count();
-  return res.status(200).send({ total: count });
+  const userId = await getUserId(headers);
+
+  await loadSavedSongs(db, headers);
+  const savedSongs = await getDatabaseSavedSongs(db, userId);
+  const count = savedSongs.length;
+  return res.status(200).send({ count });
 });
-
-// app.get("/getNextSavedSongs", async (req, res) => {
-//   await refreshData();
-//   return res.status(200).send(savedSongs.slice(req.query.start, req.query.end));
-// });
-
-// app.get("/getNextDestinationSongs", async (req, res) => {
-//   await refreshData();
-//   return res
-//     .status(200)
-//     .send(destinationSongs.slice(req.query.start, req.query.end));
-// });
 
 app.get("/getMatchingSongs", async (req, res) => {
   const db = await connectToDatabase();
@@ -117,7 +106,7 @@ app.get("/getMatchingSongs", async (req, res) => {
   );
   await updateDatabasePlaylistStatus(db, destinationSongs);
 
-  const savedSongs = db.collection().find();
+  const savedSongs = await getDatabaseSavedSongs(db, userId);
 
   const matchingTracks = savedSongs.filter(
     (track) =>
@@ -131,6 +120,22 @@ app.get("/getMatchingSongs", async (req, res) => {
 });
 
 app.post("/addSong", async (req, res) => {
+  const db = await connectToDatabase();
+
+  const playlistsPromise = getPlaylists(headers);
+  const userIdPromise = getUserId(headers);
+
+  const [playlists, userId] = await Promise.all([
+    playlistsPromise,
+    userIdPromise,
+  ]);
+
+  const destinationPlaylistId = await getDestinationPlaylistId(
+    playlists,
+    userId,
+    headers
+  );
+
   try {
     await axios.post(
       `https://api.spotify.com/v1/playlists/${destinationPlaylistId}/tracks`,
@@ -138,7 +143,14 @@ app.post("/addSong", async (req, res) => {
       { headers }
     );
 
-    // await refreshDestinationPlaylist();
+    await db.collection("saved-songs").updateOne(
+      {},
+      { $set: { "songs.$[song].isInDestinationPlaylist": true } },
+      {
+        multi: true,
+        arrayFilters: [{ "song.uri": req.body.songUri }],
+      }
+    );
     res.status(200).send();
   } catch (error) {
     console.log("addSong error", error.message);
@@ -146,6 +158,22 @@ app.post("/addSong", async (req, res) => {
 });
 
 app.delete("/removeSong", async (req, res) => {
+  const db = await connectToDatabase();
+
+  const playlistsPromise = getPlaylists(headers);
+  const userIdPromise = getUserId(headers);
+
+  const [playlists, userId] = await Promise.all([
+    playlistsPromise,
+    userIdPromise,
+  ]);
+
+  const destinationPlaylistId = await getDestinationPlaylistId(
+    playlists,
+    userId,
+    headers
+  );
+
   try {
     await axios({
       url: `https://api.spotify.com/v1/playlists/${destinationPlaylistId}/tracks`,
@@ -156,7 +184,14 @@ app.delete("/removeSong", async (req, res) => {
       },
     });
 
-    // await refreshDestinationPlaylist();
+    await db.collection("saved-songs").updateOne(
+      {},
+      { $set: { "songs.$[song].isInDestinationPlaylist": false } },
+      {
+        multi: true,
+        arrayFilters: [{ "song.uri": req.body.songUri }],
+      }
+    );
     res.status(200).send();
   } catch (error) {
     console.log("removeSong error", error.message);
