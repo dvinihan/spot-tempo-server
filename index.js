@@ -2,22 +2,23 @@ import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
 import { connectToDatabase } from "./util/mongodb.js";
-import { loadSavedSongs } from "./helpers/loadSavedSongs.js";
-import { updateDatabasePlaylistStatus } from "./helpers/updateDatabasePlaylistStatus.js";
-import { getFreshPlaylistSongs } from "./helpers/getFreshPlaylistSongs.js";
-import { getUserId } from "./helpers/getUserId.js";
-import { login } from "./helpers/login.js";
-import { getDestinationPlaylistId } from "./helpers/getDestinationPlaylistId.js";
-import { getPlaylists } from "./helpers/getPlaylists.js";
-import { getDatabaseSavedSongs } from "./helpers/getDatabaseSavedSongs.js";
+import {
+  getDestinationPlaylistId,
+  getFreshPlaylistSongs,
+  getPlaylists,
+  getUserId,
+  login,
+} from "./helpers/spotifyHelpers.js";
+import {
+  getDatabaseSavedSongs,
+  loadSavedSongs,
+  updateDatabasePlaylistStatus,
+} from "./helpers/databaseHelpers.js";
+import { buildHeaders } from "./helpers/index.js";
 
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
-
-let accessToken;
-let refreshToken;
-let headers;
 
 const app = express();
 app.use(express.json());
@@ -33,60 +34,53 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/getAccessToken", (req, res) => {
-  return res.status(200).send({ accessToken });
-});
+app.post("/login", async (req, res) => {
+  const { code, redirectUri } = req.body;
+  const { accessToken, accessTokenExpiryTime, refreshToken } = await login(
+    code,
+    redirectUri
+  );
 
-app.get("/getUserId", async (req, res) => {
-  let userId;
-  if (headers) {
-    userId = await getUserId(headers);
-  }
-  return res.status(200).send({ userId });
+  const userId = await getUserId(accessToken);
+
+  return res
+    .status(200)
+    .send({ accessToken, accessTokenExpiryTime, refreshToken, userId });
 });
 
 app.get("/getSavedSongsCount", async (req, res) => {
+  const { accessToken } = req.query;
+
   const db = await connectToDatabase();
 
-  const savedSongs = await getDatabaseSavedSongs(db, req.query.user);
+  const userId = await getUserId(accessToken);
+
+  const savedSongs = await getDatabaseSavedSongs(db, userId);
   const count = savedSongs.length;
 
   return res.status(200).send({ count });
 });
 
-app.post("/login", async (req, res) => {
-  if (!accessToken) {
-    const {
-      accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
-      headers: newHeaders,
-    } = await login(req.body);
-
-    accessToken = newAccessToken;
-    refreshToken = newRefreshToken;
-    headers = newHeaders;
-  }
-
-  const userId = await getUserId(headers);
-  return res.status(200).send({ accessToken, userId });
-});
-
 app.post("/reload", async (req, res) => {
+  const { accessToken } = req.body;
+
   const db = await connectToDatabase();
 
-  const userId = await getUserId(headers);
+  const userId = await getUserId(accessToken);
 
-  await loadSavedSongs(db, headers);
+  await loadSavedSongs(db, accessToken);
   const savedSongs = await getDatabaseSavedSongs(db, userId);
   const count = savedSongs.length;
   return res.status(200).send({ count });
 });
 
 app.get("/getMatchingSongs", async (req, res) => {
+  const { accessToken } = req.query;
+
   const db = await connectToDatabase();
 
-  const playlistsPromise = getPlaylists(headers);
-  const userIdPromise = getUserId(headers);
+  const playlistsPromise = getPlaylists(accessToken);
+  const userIdPromise = getUserId(accessToken);
 
   const [playlists, userId] = await Promise.all([
     playlistsPromise,
@@ -96,13 +90,13 @@ app.get("/getMatchingSongs", async (req, res) => {
   const destinationPlaylistId = await getDestinationPlaylistId(
     playlists,
     userId,
-    headers
+    accessToken
   );
 
   const destinationSongs = await getFreshPlaylistSongs(
     destinationPlaylistId,
     userId,
-    headers
+    accessToken
   );
   await updateDatabasePlaylistStatus(db, destinationSongs);
 
@@ -120,10 +114,12 @@ app.get("/getMatchingSongs", async (req, res) => {
 });
 
 app.post("/addSong", async (req, res) => {
+  const { accessToken } = req.body;
+
   const db = await connectToDatabase();
 
-  const playlistsPromise = getPlaylists(headers);
-  const userIdPromise = getUserId(headers);
+  const playlistsPromise = getPlaylists(accessToken);
+  const userIdPromise = getUserId(accessToken);
 
   const [playlists, userId] = await Promise.all([
     playlistsPromise,
@@ -133,14 +129,14 @@ app.post("/addSong", async (req, res) => {
   const destinationPlaylistId = await getDestinationPlaylistId(
     playlists,
     userId,
-    headers
+    accessToken
   );
 
   try {
     await axios.post(
       `https://api.spotify.com/v1/playlists/${destinationPlaylistId}/tracks`,
       { uris: [req.body.songUri] },
-      { headers }
+      { headers: buildHeaders(accessToken) }
     );
 
     await db.collection("saved-songs").updateOne(
@@ -158,10 +154,12 @@ app.post("/addSong", async (req, res) => {
 });
 
 app.delete("/removeSong", async (req, res) => {
+  const { accessToken } = req.body;
+
   const db = await connectToDatabase();
 
-  const playlistsPromise = getPlaylists(headers);
-  const userIdPromise = getUserId(headers);
+  const playlistsPromise = getPlaylists(accessToken);
+  const userIdPromise = getUserId(accessToken);
 
   const [playlists, userId] = await Promise.all([
     playlistsPromise,
@@ -171,14 +169,14 @@ app.delete("/removeSong", async (req, res) => {
   const destinationPlaylistId = await getDestinationPlaylistId(
     playlists,
     userId,
-    headers
+    accessToken
   );
 
   try {
     await axios({
       url: `https://api.spotify.com/v1/playlists/${destinationPlaylistId}/tracks`,
       method: "DELETE",
-      headers,
+      headers: buildHeaders(accessToken),
       data: {
         tracks: [{ uri: req.query.songUri }],
       },
